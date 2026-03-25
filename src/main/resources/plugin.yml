@@ -1,0 +1,7 @@
+name: BlockAnimation
+version: '${project.version}'
+main: dev.blockanimation.BlockAnimationPlugin
+api-version: '1.21'
+description: Async visible-block detection and packet-based color-shift animation API.
+author: BlockAnimation
+folia-supported: true
