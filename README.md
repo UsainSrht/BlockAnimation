@@ -10,7 +10,7 @@ Scan nearby visible surface blocks around any location, then play smooth, client
 
 - **Visibility Scanner** — Async BFS flood-fill that detects all visible surface blocks in a radius, respecting solidity and transparency. Results are immutable, serializable, and reusable.
 - **Packet-Based Rendering** — Animations are strictly client-side (fake blocks via `Player.sendBlockChange`). Zero impact on world data or server state.
-- **Shape Preservation** — Stairs stay stairs, slabs stay slabs. The material replacement system preserves block shapes, orientations, and waterlogged states.
+- **Shape Preservation** — Stairs, slabs, doors, trapdoors, walls, fences, buttons, pressure plates, carpets, glass panes — all keep their exact shape, facing, connections, and states during animation.
 - **3 Built-In Animations**
   - **Spread** — Radial wave expanding from one or more centers. Colors emanate outward like ripples.
   - **Pass-Through** — Directional sweep along any yaw angle, with optional trailing color wave.
@@ -62,11 +62,20 @@ All optional arguments show their **default values** as tab-complete hints.
 
 Add BlockAnimation as a dependency and shade it into your plugin.
 
-### Maven
+### Repository
+
+```xml
+<repository>
+    <id>codemc-releases</id>
+    <url>https://repo.codemc.io/repository/maven-public/</url>
+</repository>
+```
+
+### Dependency
 
 ```xml
 <dependency>
-    <groupId>dev.blockanimation</groupId>
+    <groupId>me.usainsrht.blockanimation</groupId>
     <artifactId>BlockAnimation</artifactId>
     <version>1.0.1</version>
     <classifier>api</classifier>

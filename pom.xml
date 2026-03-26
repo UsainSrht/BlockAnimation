@@ -4,7 +4,7 @@
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
     <modelVersion>4.0.0</modelVersion>
 
-    <groupId>dev.blockanimation</groupId>
+    <groupId>me.usainsrht.blockanimation</groupId>
     <artifactId>BlockAnimation</artifactId>
     <version>1.0.1</version>
     <packaging>jar</packaging>
@@ -108,7 +108,7 @@
                                     <relocations>
                                         <relocation>
                                             <pattern>space.arim.morepaperlib</pattern>
-                                            <shadedPattern>dev.blockanimation.lib.morepaperlib</shadedPattern>
+                                            <shadedPattern>me.usainsrht.blockanimation.lib.morepaperlib</shadedPattern>
                                         </relocation>
                                     </relocations>
                                     <minimizeJar>true</minimizeJar>
@@ -139,8 +139,8 @@
                             <classifier>api</classifier>
                             <excludes>
                                 <exclude>plugin.yml</exclude>
-                                <exclude>dev/blockanimation/command/**</exclude>
-                                <exclude>dev/blockanimation/BlockAnimationPlugin.class</exclude>
+                                <exclude>me/usainsrht/blockanimation/command/**</exclude>
+                                <exclude>me/usainsrht/blockanimation/BlockAnimationPlugin.class</exclude>
                             </excludes>
                         </configuration>
                     </plugin>
