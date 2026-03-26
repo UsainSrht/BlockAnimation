@@ -139,10 +139,10 @@ public final class PassThroughAnimation implements Animation {
                 changes.put(block, replacer.computeReplacement(block.toBlockData(), color));
 
             } else if (trail) {
-                // ---- Trail mode: check if this block has ever been passed ----
+                // ---- Trail mode ----
                 boolean wasTouched;
                 if (allBlocksTouched) {
-                    // Everything was passed during the first sweep
+                    // After one full forward pass, ALL blocks stay colored.
                     wasTouched = true;
                 } else if (movingForward) {
                     wasTouched = norm < bandTrailing;
@@ -151,12 +151,42 @@ public final class PassThroughAnimation implements Animation {
                 }
 
                 if (wasTouched) {
-                    // Color cycles based on when the band first passed this block.
-                    // First-touch tick ≈ (norm + bandWidth) / sweepRange * sweepDuration
-                    long tickFirstTouched = (long) ((norm + bandWidth) / sweepRange * sweepDurationTicks);
-                    long ticksSinceTouched = Math.max(0, elapsedTicks - tickFirstTouched);
+                    float palettePos;
+                    if (ctx.loopMode() == LoopMode.REVERSE) {
+                        // REVERSE: color based on when the band MOST RECENTLY passed
+                        // this block (could be forward or backward pass).
+                        int halfCycle = (int) (elapsedTicks / sweepDurationTicks);
+                        long ticksIntoHalf = elapsedTicks % sweepDurationTicks;
+                        boolean halfForward = (halfCycle % 2) == 0;
 
-                    float palettePos = ctx.resolveProgress(ticksSinceTouched, cycleDurationTicks);
+                        // When does the band's trailing edge pass this block in each direction?
+                        float fwdTouchFrac = (norm + bandWidth) / sweepRange;
+                        float bwdTouchFrac = ((1.0f - norm) + bandWidth) / sweepRange;
+                        float currentHalfTouchFrac = halfForward ? fwdTouchFrac : bwdTouchFrac;
+                        float progressInHalf = (float) ticksIntoHalf / sweepDurationTicks;
+
+                        long tickLastTouched;
+                        if (progressInHalf >= currentHalfTouchFrac) {
+                            // Band already passed this block in the current half-cycle
+                            tickLastTouched = (long) (halfCycle * sweepDurationTicks
+                                    + currentHalfTouchFrac * sweepDurationTicks);
+                        } else if (halfCycle > 0) {
+                            // Not yet reached in current half — use previous half-cycle
+                            boolean prevForward = !halfForward;
+                            float prevTouchFrac = prevForward ? fwdTouchFrac : bwdTouchFrac;
+                            tickLastTouched = (long) ((halfCycle - 1) * sweepDurationTicks
+                                    + prevTouchFrac * sweepDurationTicks);
+                        } else {
+                            tickLastTouched = 0;
+                        }
+                        long ticksSinceLastTouched = Math.max(0, elapsedTicks - tickLastTouched);
+                        palettePos = ctx.resolveProgress(ticksSinceLastTouched, cycleDurationTicks);
+                    } else {
+                        // RESTART/ONCE: color based on when this block was first touched
+                        long tickFirstTouched = (long) ((norm + bandWidth) / sweepRange * sweepDurationTicks);
+                        long ticksSinceTouched = Math.max(0, elapsedTicks - tickFirstTouched);
+                        palettePos = ctx.resolveProgress(ticksSinceTouched, cycleDurationTicks);
+                    }
                     RGBColor color = ctx.palette().getColorAt(palettePos);
                     changes.put(block, replacer.computeReplacement(block.toBlockData(), color));
                 } else {
