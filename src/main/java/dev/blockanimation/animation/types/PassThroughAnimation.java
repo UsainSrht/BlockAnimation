@@ -2,6 +2,7 @@ package dev.blockanimation.animation.types;
 
 import dev.blockanimation.animation.Animation;
 import dev.blockanimation.animation.AnimationContext;
+import dev.blockanimation.animation.LoopMode;
 import dev.blockanimation.color.RGBColor;
 import dev.blockanimation.packet.FakeBlockSender;
 import dev.blockanimation.shape.ShapeMatchingReplacer;
@@ -13,66 +14,61 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * <b>Pass-through (Directional Wave)</b> animation — a color wave sweeps across
- * the visible blocks along a specific yaw angle, like a curtain of light.
+ * <b>Pass-through (Directional Wave)</b> animation.
  *
- * <h3>Continuous mode (default)</h3>
- * Blocks behind the sweep front keep their color and continue cycling.
- * Each block's palette position = how long ago the sweep front passed it.
- * This creates a true directional wave: the first color appears at the leading
- * edge and older colors trail behind, cycling through the palette.
+ * <h3>Styles (LoopMode × trail flag)</h3>
+ * <ul>
+ *   <li>{@code trail=false, RESTART} — band sweeps, blocks revert behind it, loops cleanly.</li>
+ *   <li>{@code trail=true,  RESTART} — band sweeps, blocks behind keep cycling, loops forever.</li>
+ *   <li>{@code trail=false, REVERSE} — band ping-pongs, blocks revert behind it.</li>
+ *   <li>{@code trail=true,  REVERSE} — band ping-pongs, blocks behind keep cycling.</li>
+ * </ul>
  *
- * <h3>Band-only mode</h3>
- * When {@code continuous = false}, only the band is colored; blocks outside revert.
+ * <h3>Key behaviors</h3>
+ * <ul>
+ *   <li>The sweep range is extended by {@code bandWidth} so the <i>entire</i> band
+ *       exits before the loop restarts — no cutoff.</li>
+ *   <li>In trail mode, once the band has completed at least one full pass, all blocks
+ *       are considered "touched" and stay colored permanently (cycling).</li>
+ * </ul>
  */
 public final class PassThroughAnimation implements Animation {
 
-    /** Sweep direction yaw in degrees (0 = south, 90 = west). */
     private final float yawDegrees;
-
-    /** Ticks for one full directional pass. */
     private final long sweepDurationTicks;
-
-    /** Ticks for one full palette cycle on a colored block. */
     private final long cycleDurationTicks;
-
-    /** Width of the color band as a fraction of total extent (0..1). */
     private final float bandWidth;
-
-    /** When true, blocks retain color after the band passes. */
-    private final boolean continuous;
+    private final boolean trail;
 
     /**
-     * Full constructor.
-     *
-     * @param yawDegrees         sweep direction in degrees
-     * @param sweepDurationTicks ticks for one directional pass
-     * @param cycleDurationTicks ticks for one full palette cycle per block
+     * @param yawDegrees         sweep direction (0 = south, 90 = west)
+     * @param sweepDurationTicks ticks for one full pass
+     * @param cycleDurationTicks ticks for one palette cycle on trailing blocks
      * @param bandWidth          fraction (0..1) of extent covered by the band
-     * @param continuous         if true, blocks keep color after the band passes
+     * @param trail              if true, blocks keep cycling color after band passes
      */
     public PassThroughAnimation(float yawDegrees, long sweepDurationTicks,
                                 long cycleDurationTicks, float bandWidth,
-                                boolean continuous) {
+                                boolean trail) {
         this.yawDegrees = yawDegrees;
         this.sweepDurationTicks = Math.max(1, sweepDurationTicks);
         this.cycleDurationTicks = Math.max(1, cycleDurationTicks);
         this.bandWidth = Math.max(0.05f, Math.min(1.0f, bandWidth));
-        this.continuous = continuous;
+        this.trail = trail;
     }
 
     public PassThroughAnimation(float yawDegrees, long sweepDurationTicks,
-                                float bandWidth, boolean continuous) {
-        this(yawDegrees, sweepDurationTicks, 60, bandWidth, continuous);
+                                float bandWidth, boolean trail) {
+        this(yawDegrees, sweepDurationTicks, 60, bandWidth, trail);
     }
 
     public PassThroughAnimation(float yawDegrees, long sweepDurationTicks, float bandWidth) {
-        this(yawDegrees, sweepDurationTicks, 60, bandWidth, true);
+        this(yawDegrees, sweepDurationTicks, 60, bandWidth, false);
     }
 
-    /** Default: sweep south, 2s, 3s cycle, 30% band, continuous. */
+    /** Default: south, 2s sweep, 3s cycle, 30% band, no trail. */
     public PassThroughAnimation() {
-        this(0f, 40, 60, 0.3f, true);
+        this(0f, 40, 60, 0.3f, false);
     }
 
     @Override
@@ -85,79 +81,91 @@ public final class PassThroughAnimation implements Animation {
         List<BlockInfo> blocks = ctx.visibleBlocks().getBlocks();
         if (blocks.isEmpty()) return;
 
-        // Compute sweep axis from yaw
+        // --- Projection ---
         double yawRad = Math.toRadians(yawDegrees);
         double axisX = -Math.sin(yawRad);
         double axisZ = Math.cos(yawRad);
-
         double cx = ctx.visibleBlocks().getCenterX();
         double cz = ctx.visibleBlocks().getCenterZ();
 
-        // Project all blocks onto the sweep axis and find min/max
-        double minProj = Double.MAX_VALUE;
-        double maxProj = -Double.MAX_VALUE;
+        double minProj = Double.MAX_VALUE, maxProj = -Double.MAX_VALUE;
         double[] projections = new double[blocks.size()];
-
         for (int i = 0; i < blocks.size(); i++) {
             BlockInfo b = blocks.get(i);
-            double dx = (b.x() + 0.5) - cx;
-            double dz = (b.z() + 0.5) - cz;
-            double proj = dx * axisX + dz * axisZ;
-            projections[i] = proj;
-            if (proj < minProj) minProj = proj;
-            if (proj > maxProj) maxProj = proj;
+            projections[i] = ((b.x() + 0.5) - cx) * axisX + ((b.z() + 0.5) - cz) * axisZ;
+            if (projections[i] < minProj) minProj = projections[i];
+            if (projections[i] > maxProj) maxProj = projections[i];
         }
-
         double totalExtent = maxProj - minProj;
         if (totalExtent <= 0) totalExtent = 1;
 
-        // Sweep front position using loop mode (0..1)
-        float sweepPos = ctx.resolveProgress(elapsedTicks, sweepDurationTicks);
+        // --- Sweep position ---
+        // Extended range: band fully enters AND exits before the loop resets.
+        // Sweep maps resolvedProgress 0..1 → bandLeading 0..(1+bandWidth).
+        // At progress=0 the band is fully off-screen left (trailing = -bandWidth).
+        // At progress=1 the band is fully off-screen right (trailing = 1.0).
+        float sweepRange = 1.0f + bandWidth;
+        float resolvedProgress = ctx.resolveProgress(elapsedTicks, sweepDurationTicks);
+        float bandLeading = resolvedProgress * sweepRange;
+        float bandTrailing = bandLeading - bandWidth;
 
-        // Band boundaries
-        float bandLeading = sweepPos;
-        float bandTrailing = sweepPos - bandWidth;
+        // Direction (for REVERSE ping-pong)
+        boolean movingForward = true;
+        if (ctx.loopMode() == LoopMode.REVERSE) {
+            long fullCycle = sweepDurationTicks * 2;
+            movingForward = (elapsedTicks % fullCycle) < sweepDurationTicks;
+        }
+
+        // Has the band completed at least one full forward pass?
+        // After one pass, every block position [0,1] has been swept past.
+        boolean allBlocksTouched = ((float) elapsedTicks / sweepDurationTicks) >= 1.0f;
 
         ShapeMatchingReplacer replacer = ctx.replacer();
         Map<BlockInfo, BlockData> changes = new HashMap<>();
 
         for (int i = 0; i < blocks.size(); i++) {
-            float normalizedProj = (float) ((projections[i] - minProj) / totalExtent);
+            float norm = (float) ((projections[i] - minProj) / totalExtent);
+            BlockInfo block = blocks.get(i);
 
-            boolean inBand = normalizedProj >= bandTrailing && normalizedProj <= bandLeading;
-            boolean behindBand = normalizedProj < bandTrailing;
+            boolean inBand = norm >= bandTrailing && norm <= bandLeading;
 
             if (inBand) {
-                // In the active band — color based on position within band
-                float bandPos = (normalizedProj - bandTrailing) / bandWidth;
+                // ---- Inside the active band ----
+                float bandPos = (norm - bandTrailing) / bandWidth;
+                if (!movingForward) bandPos = 1.0f - bandPos; // flip gradient direction
+                bandPos = Math.max(0f, Math.min(1f, bandPos));
+
                 RGBColor color = ctx.palette().getColorAt(bandPos);
+                changes.put(block, replacer.computeReplacement(block.toBlockData(), color));
 
-                BlockInfo block = blocks.get(i);
-                BlockData original = block.toBlockData();
-                BlockData replacement = replacer.computeReplacement(original, color);
-                changes.put(block, replacement);
+            } else if (trail) {
+                // ---- Trail mode: check if this block has ever been passed ----
+                boolean wasTouched;
+                if (allBlocksTouched) {
+                    // Everything was passed during the first sweep
+                    wasTouched = true;
+                } else if (movingForward) {
+                    wasTouched = norm < bandTrailing;
+                } else {
+                    wasTouched = norm > bandLeading;
+                }
 
-            } else if (continuous && behindBand) {
-                // Behind the band: this block was first reached when the sweep
-                // front passed it. Compute time since reached.
-                // The sweep front reached normalizedProj at tick:
-                //   t_reach = normalizedProj * sweepDurationTicks  (for RESTART/first pass)
-                // For loop modes, we use a simplified approach: the distance
-                // from the current sweep front to this block = how long ago it was passed.
-                float distBehindFront = bandTrailing - normalizedProj;
-                long ticksSinceReached = (long) (distBehindFront * sweepDurationTicks);
+                if (wasTouched) {
+                    // Color cycles based on when the band first passed this block.
+                    // First-touch tick ≈ (norm + bandWidth) / sweepRange * sweepDuration
+                    long tickFirstTouched = (long) ((norm + bandWidth) / sweepRange * sweepDurationTicks);
+                    long ticksSinceTouched = Math.max(0, elapsedTicks - tickFirstTouched);
 
-                float palettePos = ctx.resolveProgress(ticksSinceReached, cycleDurationTicks);
-                RGBColor color = ctx.palette().getColorAt(palettePos);
+                    float palettePos = ctx.resolveProgress(ticksSinceTouched, cycleDurationTicks);
+                    RGBColor color = ctx.palette().getColorAt(palettePos);
+                    changes.put(block, replacer.computeReplacement(block.toBlockData(), color));
+                } else {
+                    // Not yet touched — keep original
+                    changes.put(block, block.toBlockData());
+                }
 
-                BlockInfo block = blocks.get(i);
-                BlockData original = block.toBlockData();
-                BlockData replacement = replacer.computeReplacement(original, color);
-                changes.put(block, replacement);
-
-            } else if (!continuous) {
-                // Not in band and not continuous — revert to original
-                BlockInfo block = blocks.get(i);
+            } else {
+                // ---- No trail, not in band — revert ----
                 changes.put(block, block.toBlockData());
             }
         }
