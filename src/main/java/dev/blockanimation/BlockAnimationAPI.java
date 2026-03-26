@@ -3,6 +3,7 @@ package dev.blockanimation;
 import dev.blockanimation.animation.Animation;
 import dev.blockanimation.animation.AnimationEngine;
 import dev.blockanimation.animation.AnimationTask;
+import dev.blockanimation.animation.LoopMode;
 import dev.blockanimation.color.ColorPalette;
 import dev.blockanimation.visibility.VisibilityAnalyzer;
 import dev.blockanimation.visibility.VisibleBlocks;
@@ -14,31 +15,37 @@ import org.bukkit.plugin.java.JavaPlugin;
 import java.io.File;
 import java.io.IOException;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Public entry-point API for the BlockAnimation plugin.
  * <p>
- * External plugins obtain this via {@code BlockAnimationPlugin.getInstance().getApi()}.
+ * When used as a plugin: {@code BlockAnimationPlugin.getInstance().getApi()}<br>
+ * When shaded as an API: construct directly via the public constructor.
  *
  * <h3>Typical usage</h3>
  * <pre>{@code
  * BlockAnimationAPI api = BlockAnimationPlugin.getInstance().getApi();
  *
- * // 1. Calculate (or load) visible blocks
+ * // Scan visible blocks
  * CompletableFuture<VisibleBlocks> scan = api.calculateVisibleBlocks(location, 16);
  *
- * // 2. Define a palette
+ * // Define a gradient
  * ColorPalette palette = new GradientPalette(List.of(
  *     new RGBColor(0, 0, 255),
  *     new RGBColor(128, 0, 255)
  * ));
  *
- * // 3. Start a long-running task
- * CompletableFuture<?> dbTask = CompletableFuture.runAsync(() -> heavyDatabaseWork());
+ * // Option A: play for a fixed duration
+ * scan.thenAccept(blocks ->
+ *     api.playAnimation(player, blocks, new SpreadAnimation(40), palette,
+ *                       5, TimeUnit.SECONDS, LoopMode.REVERSE)
+ * );
  *
- * // 4. Play an animation that runs until the task finishes
- * scan.thenAccept(visibleBlocks ->
- *     api.playAnimation(player, visibleBlocks, new SpreadAnimation(), palette, dbTask)
+ * // Option B: play until a future completes
+ * CompletableFuture<?> dbTask = CompletableFuture.runAsync(() -> heavyWork());
+ * scan.thenAccept(blocks ->
+ *     api.playAnimation(player, blocks, new SpreadAnimation(40), palette, dbTask)
  * );
  * }</pre>
  */
@@ -72,41 +79,22 @@ public final class BlockAnimationAPI {
         return visibilityAnalyzer.analyze(center, radius);
     }
 
-    /**
-     * Load a previously saved {@link VisibleBlocks} from disk.
-     *
-     * @param file the JSON file
-     * @return the deserialized data
-     * @throws IOException on read failure
-     */
+    /** Load a previously saved {@link VisibleBlocks} from disk. */
     public VisibleBlocks loadVisibleBlocks(File file) throws IOException {
         return VisibleBlocks.load(file);
     }
 
-    /**
-     * Save a {@link VisibleBlocks} to disk for later reuse.
-     *
-     * @param visibleBlocks the data to persist
-     * @param file          target file
-     * @throws IOException on write failure
-     */
+    /** Save a {@link VisibleBlocks} to disk for later reuse. */
     public void saveVisibleBlocks(VisibleBlocks visibleBlocks, File file) throws IOException {
         visibleBlocks.save(file);
     }
 
     // ------------------------------------------------------------------
-    // Animations
+    // Animations — future-based
     // ------------------------------------------------------------------
 
     /**
-     * Start an animation for a player, driven until the given future completes.
-     *
-     * @param player        target player
-     * @param visibleBlocks blocks to animate
-     * @param animation     animation pattern (e.g., {@code new SpreadAnimation()})
-     * @param palette       color gradient
-     * @param boundFuture   the animation runs until this future completes
-     * @return the running {@link AnimationTask}
+     * Play animation until the given future completes.
      */
     public AnimationTask playAnimation(Player player, VisibleBlocks visibleBlocks,
                                        Animation animation, ColorPalette palette,
@@ -115,49 +103,71 @@ public final class BlockAnimationAPI {
     }
 
     /**
-     * Start an animation with custom timing.
-     *
-     * @param player         target player
-     * @param visibleBlocks  blocks to animate
-     * @param animation      animation pattern
-     * @param palette        color gradient
-     * @param boundFuture    controlling future
-     * @param tickIntervalMs tick interval in ms (min 50)
-     * @param durationMs     total duration in ms (0 = indefinite)
-     * @return the running {@link AnimationTask}
+     * Play animation until the given future completes, with custom timing and loop mode.
      */
     public AnimationTask playAnimation(Player player, VisibleBlocks visibleBlocks,
                                        Animation animation, ColorPalette palette,
                                        CompletableFuture<?> boundFuture,
-                                       long tickIntervalMs, long durationMs) {
+                                       long tickIntervalMs, long durationMs,
+                                       LoopMode loopMode) {
         return animationEngine.play(player, visibleBlocks, animation, palette,
-                boundFuture, tickIntervalMs, durationMs);
+                boundFuture, tickIntervalMs, durationMs, loopMode);
+    }
+
+    // ------------------------------------------------------------------
+    // Animations — duration-based (no future)
+    // ------------------------------------------------------------------
+
+    /**
+     * Play animation for a fixed duration. No {@link CompletableFuture} needed.
+     *
+     * @param player        target player
+     * @param visibleBlocks blocks to animate
+     * @param animation     animation pattern
+     * @param palette       color gradient
+     * @param duration      how long the animation plays
+     * @param unit          time unit
+     * @param loopMode      how the animation cycles (RESTART, REVERSE, ONCE)
+     * @return the running task
+     */
+    public AnimationTask playAnimation(Player player, VisibleBlocks visibleBlocks,
+                                       Animation animation, ColorPalette palette,
+                                       long duration, TimeUnit unit, LoopMode loopMode) {
+        return animationEngine.play(player, visibleBlocks, animation, palette,
+                duration, unit, loopMode);
     }
 
     /**
-     * Stop all active animations for a player.
+     * Play animation for a fixed duration with custom tick interval.
      */
+    public AnimationTask playAnimation(Player player, VisibleBlocks visibleBlocks,
+                                       Animation animation, ColorPalette palette,
+                                       long duration, TimeUnit unit, LoopMode loopMode,
+                                       long tickIntervalMs) {
+        return animationEngine.play(player, visibleBlocks, animation, palette,
+                duration, unit, loopMode, tickIntervalMs);
+    }
+
+    // ------------------------------------------------------------------
+    // Stop / Query
+    // ------------------------------------------------------------------
+
+    /** Stop all active animations for a player. */
     public void stopAnimations(Player player) {
         animationEngine.stopAll(player);
     }
 
-    /**
-     * Check if a player has any running animations.
-     */
+    /** Check if a player has any running animations. */
     public boolean hasActiveAnimations(Player player) {
         return animationEngine.hasActiveAnimations(player);
     }
 
-    /**
-     * @return the underlying animation engine for advanced use
-     */
+    /** @return the underlying animation engine for advanced use */
     public AnimationEngine getAnimationEngine() {
         return animationEngine;
     }
 
-    /**
-     * @return the visibility analyzer for advanced use
-     */
+    /** @return the visibility analyzer for advanced use */
     public VisibilityAnalyzer getVisibilityAnalyzer() {
         return visibilityAnalyzer;
     }
@@ -166,10 +176,7 @@ public final class BlockAnimationAPI {
     // Lifecycle
     // ------------------------------------------------------------------
 
-    /**
-     * Gracefully shut down all animations and release resources.
-     * Called automatically on plugin disable.
-     */
+    /** Gracefully shut down all animations. Called automatically on plugin disable. */
     public void shutdown() {
         animationEngine.stopAll();
         plugin.getLogger().info("BlockAnimation API shut down.");

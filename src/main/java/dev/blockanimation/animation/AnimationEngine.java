@@ -10,6 +10,7 @@ import org.bukkit.plugin.java.JavaPlugin;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeUnit;
 import java.util.logging.Logger;
 
 /**
@@ -17,10 +18,12 @@ import java.util.logging.Logger;
  * <p>
  * Maintains a registry of running {@link AnimationTask} instances per player
  * and provides methods to start, stop, and query animations.
+ * <p>
+ * Animations can be driven by a {@link CompletableFuture} (runs until it completes),
+ * by a fixed duration, or both (whichever ends first).
  *
  * <h3>Concurrency</h3>
- * All public methods are thread-safe. Animation tasks themselves run on
- * the appropriate region thread (Folia) or main thread (Spigot/Paper).
+ * All public methods are thread-safe.
  */
 public final class AnimationEngine {
 
@@ -40,82 +43,120 @@ public final class AnimationEngine {
     }
 
     // ------------------------------------------------------------------
-    // Play
+    // Play (future-based)
     // ------------------------------------------------------------------
 
     /**
-     * Start an animation for a player.
-     *
-     * @param player       target player
-     * @param visibleBlocks the blocks to animate
-     * @param animation    the animation pattern
-     * @param palette      the color gradient
-     * @param boundFuture  the controlling future — animation runs until this completes
-     * @return the created {@link AnimationTask}
+     * Start an animation driven by a {@link CompletableFuture}.
      */
     public AnimationTask play(Player player, VisibleBlocks visibleBlocks,
                               Animation animation, ColorPalette palette,
                               CompletableFuture<?> boundFuture) {
         return play(player, visibleBlocks, animation, palette, boundFuture,
-                50, 0); // default: 1 tick interval, indefinite duration
+                100, 0, LoopMode.RESTART);
     }
 
     /**
-     * Start an animation for a player with custom timing.
-     *
-     * @param player         target player
-     * @param visibleBlocks  the blocks to animate
-     * @param animation      the animation pattern
-     * @param palette        the color gradient
-     * @param boundFuture    the controlling future — animation runs until this completes
-     * @param tickIntervalMs tick interval in milliseconds (minimum 50ms = 1 server tick)
-     * @param durationMs     total duration in milliseconds (0 = indefinite)
-     * @return the created {@link AnimationTask}
+     * Start an animation driven by a future, with custom timing and loop mode.
      */
     public AnimationTask play(Player player, VisibleBlocks visibleBlocks,
                               Animation animation, ColorPalette palette,
                               CompletableFuture<?> boundFuture,
                               long tickIntervalMs, long durationMs) {
         return play(player, visibleBlocks, animation, palette, boundFuture,
-                tickIntervalMs, durationMs, defaultReplacer);
+                tickIntervalMs, durationMs, LoopMode.RESTART);
     }
 
     /**
-     * Start an animation for a player with full control over all parameters.
-     *
-     * @param player         target player
-     * @param visibleBlocks  the blocks to animate
-     * @param animation      the animation pattern
-     * @param palette        the color gradient
-     * @param boundFuture    the controlling future — animation runs until this completes
-     * @param tickIntervalMs tick interval in milliseconds
-     * @param durationMs     total duration in milliseconds (0 = indefinite)
-     * @param replacer       custom shape-matching replacer
-     * @return the created {@link AnimationTask}
+     * Start an animation driven by a future, with full control.
      */
     public AnimationTask play(Player player, VisibleBlocks visibleBlocks,
                               Animation animation, ColorPalette palette,
                               CompletableFuture<?> boundFuture,
                               long tickIntervalMs, long durationMs,
-                              ShapeMatchingReplacer replacer) {
+                              LoopMode loopMode) {
+        return play(player, visibleBlocks, animation, palette, boundFuture,
+                tickIntervalMs, durationMs, loopMode, defaultReplacer);
+    }
+
+    // ------------------------------------------------------------------
+    // Play (duration-based — no future required)
+    // ------------------------------------------------------------------
+
+    /**
+     * Start an animation for a fixed duration. No {@link CompletableFuture} needed.
+     *
+     * @param player        target player
+     * @param visibleBlocks blocks to animate
+     * @param animation     animation pattern
+     * @param palette       color gradient
+     * @param duration      how long the animation plays
+     * @param unit          time unit for the duration
+     * @param loopMode      how the animation cycles
+     * @return the running task
+     */
+    public AnimationTask play(Player player, VisibleBlocks visibleBlocks,
+                              Animation animation, ColorPalette palette,
+                              long duration, TimeUnit unit, LoopMode loopMode) {
+        return play(player, visibleBlocks, animation, palette, null,
+                100, unit.toMillis(duration), loopMode, defaultReplacer);
+    }
+
+    /**
+     * Start an animation for a fixed duration with custom tick interval.
+     */
+    public AnimationTask play(Player player, VisibleBlocks visibleBlocks,
+                              Animation animation, ColorPalette palette,
+                              long duration, TimeUnit unit, LoopMode loopMode,
+                              long tickIntervalMs) {
+        return play(player, visibleBlocks, animation, palette, null,
+                tickIntervalMs, unit.toMillis(duration), loopMode, defaultReplacer);
+    }
+
+    // ------------------------------------------------------------------
+    // Core play (all roads lead here)
+    // ------------------------------------------------------------------
+
+    /**
+     * Start an animation with full control over all parameters.
+     *
+     * @param player         target player
+     * @param visibleBlocks  blocks to animate
+     * @param animation      animation pattern
+     * @param palette        color gradient
+     * @param boundFuture    controlling future (nullable — use duration if null)
+     * @param tickIntervalMs tick interval in ms
+     * @param durationMs     total duration in ms (0 = indefinite, requires future)
+     * @param loopMode       how the animation cycles
+     * @param replacer       shape-matching replacer
+     * @return the running task
+     */
+    public AnimationTask play(Player player, VisibleBlocks visibleBlocks,
+                              Animation animation, ColorPalette palette,
+                              CompletableFuture<?> boundFuture,
+                              long tickIntervalMs, long durationMs,
+                              LoopMode loopMode, ShapeMatchingReplacer replacer) {
         AnimationContext ctx = new AnimationContext(
                 player, visibleBlocks, palette, replacer,
-                Math.max(50, tickIntervalMs), durationMs
+                Math.max(50, tickIntervalMs), durationMs, loopMode
         );
 
-        AnimationTask task = new AnimationTask(animation, ctx, boundFuture, plugin, morePaperLib);
+        AnimationTask task = new AnimationTask(animation, ctx, boundFuture, morePaperLib);
 
         // Register
         activeTasks.computeIfAbsent(player.getUniqueId(), k -> Collections.synchronizedList(new ArrayList<>()))
                 .add(task);
 
         // Clean up registration when the task stops
-        boundFuture.whenComplete((r, t) -> removeTask(player.getUniqueId(), task));
+        Runnable cleanup = () -> removeTask(player.getUniqueId(), task);
+        if (boundFuture != null) {
+            boundFuture.whenComplete((r, t) -> cleanup.run());
+        }
 
         task.start();
 
         LOGGER.fine(() -> "Started animation '" + animation.getName() + "' for " + player.getName()
-                + " with " + visibleBlocks.getBlocks().size() + " blocks");
+                + " with " + visibleBlocks.getBlocks().size() + " blocks, loopMode=" + loopMode);
 
         return task;
     }
@@ -124,9 +165,7 @@ public final class AnimationEngine {
     // Stop
     // ------------------------------------------------------------------
 
-    /**
-     * Stop all active animations for a player.
-     */
+    /** Stop all active animations for a player. */
     public void stopAll(Player player) {
         List<AnimationTask> tasks = activeTasks.remove(player.getUniqueId());
         if (tasks != null) {
@@ -138,16 +177,12 @@ public final class AnimationEngine {
         }
     }
 
-    /**
-     * Stop a specific animation task.
-     */
+    /** Stop a specific animation task. */
     public void stop(AnimationTask task) {
         task.stop();
     }
 
-    /**
-     * Stop all animations across all players (called on plugin disable).
-     */
+    /** Stop all animations across all players (called on plugin disable). */
     public void stopAll() {
         for (Map.Entry<UUID, List<AnimationTask>> entry : activeTasks.entrySet()) {
             List<AnimationTask> tasks = entry.getValue();
@@ -164,9 +199,7 @@ public final class AnimationEngine {
     // Query
     // ------------------------------------------------------------------
 
-    /**
-     * @return true if the player has any active animations
-     */
+    /** @return true if the player has any active animations */
     public boolean hasActiveAnimations(Player player) {
         List<AnimationTask> tasks = activeTasks.get(player.getUniqueId());
         if (tasks == null) return false;
@@ -175,9 +208,7 @@ public final class AnimationEngine {
         }
     }
 
-    /**
-     * @return unmodifiable list of active tasks for the player (may be empty)
-     */
+    /** @return unmodifiable list of active tasks for the player */
     public List<AnimationTask> getActiveTasks(Player player) {
         List<AnimationTask> tasks = activeTasks.get(player.getUniqueId());
         if (tasks == null) return Collections.emptyList();

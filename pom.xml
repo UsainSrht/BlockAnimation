@@ -6,7 +6,7 @@
 
     <groupId>dev.blockanimation</groupId>
     <artifactId>BlockAnimation</artifactId>
-    <version>1.0.0-SNAPSHOT</version>
+    <version>1.0.1</version>
     <packaging>jar</packaging>
 
     <name>BlockAnimation</name>
@@ -35,10 +35,10 @@
     </repositories>
 
     <dependencies>
-        <!-- Spigot API -->
+        <!-- Paper API (includes Spigot API + Brigadier commands + Adventure) -->
         <dependency>
-            <groupId>org.spigotmc</groupId>
-            <artifactId>spigot-api</artifactId>
+            <groupId>io.papermc.paper</groupId>
+            <artifactId>paper-api</artifactId>
             <version>1.21-R0.1-SNAPSHOT</version>
             <scope>provided</scope>
         </dependency>
@@ -73,28 +73,73 @@
                     <target>${java.version}</target>
                 </configuration>
             </plugin>
-
-            <!-- Shade MorePaperLib into the JAR -->
-            <plugin>
-                <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-shade-plugin</artifactId>
-                <version>3.5.1</version>
-                <executions>
-                    <execution>
-                        <phase>package</phase>
-                        <goals><goal>shade</goal></goals>
-                        <configuration>
-                            <relocations>
-                                <relocation>
-                                    <pattern>space.arim.morepaperlib</pattern>
-                                    <shadedPattern>dev.blockanimation.lib.morepaperlib</shadedPattern>
-                                </relocation>
-                            </relocations>
-                            <minimizeJar>true</minimizeJar>
-                        </configuration>
-                    </execution>
-                </executions>
-            </plugin>
         </plugins>
     </build>
+
+    <profiles>
+        <!--
+            PLUGIN profile (default) — produces a shaded JAR with:
+              - MorePaperLib relocated into the JAR
+              - plugin.yml included
+              - All classes (including the command) included
+        -->
+        <profile>
+            <id>plugin</id>
+            <activation>
+                <activeByDefault>true</activeByDefault>
+            </activation>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-shade-plugin</artifactId>
+                        <version>3.5.1</version>
+                        <executions>
+                            <execution>
+                                <phase>package</phase>
+                                <goals><goal>shade</goal></goals>
+                                <configuration>
+                                    <relocations>
+                                        <relocation>
+                                            <pattern>space.arim.morepaperlib</pattern>
+                                            <shadedPattern>dev.blockanimation.lib.morepaperlib</shadedPattern>
+                                        </relocation>
+                                    </relocations>
+                                    <minimizeJar>true</minimizeJar>
+                                </configuration>
+                            </execution>
+                        </executions>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+
+        <!--
+            API profile — produces a slim JAR for other plugins to shade/depend on.
+              - MorePaperLib is NOT shaded (consumers shade it themselves)
+              - plugin.yml is excluded (this is a library, not a standalone plugin)
+              - Command class is excluded
+              - Classifier: "api"
+        -->
+        <profile>
+            <id>api</id>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-jar-plugin</artifactId>
+                        <version>3.3.0</version>
+                        <configuration>
+                            <classifier>api</classifier>
+                            <excludes>
+                                <exclude>plugin.yml</exclude>
+                                <exclude>dev/blockanimation/command/**</exclude>
+                                <exclude>dev/blockanimation/BlockAnimationPlugin.class</exclude>
+                            </excludes>
+                        </configuration>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+    </profiles>
 </project>

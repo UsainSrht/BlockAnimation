@@ -22,8 +22,6 @@ public final class BlockColorRegistry {
     /** Per-ShapeGroup caches for fast filtered lookups */
     private static final Map<ShapeGroup, Map<Material, RGBColor>> GROUP_CACHES = new ConcurrentHashMap<>();
 
-    private BlockColorRegistry() {}
-
     // ------------------------------------------------------------------
     // Initialization
     // ------------------------------------------------------------------

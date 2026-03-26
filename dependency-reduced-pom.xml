@@ -4,7 +4,7 @@
   <groupId>dev.blockanimation</groupId>
   <artifactId>BlockAnimation</artifactId>
   <name>BlockAnimation</name>
-  <version>1.0.0-SNAPSHOT</version>
+  <version>1.0.1</version>
   <description>Async visible-block detection and packet-based color-shift animation API for Spigot, Paper, and Folia.</description>
   <build>
     <defaultGoal>clean package</defaultGoal>
@@ -17,29 +17,57 @@
           <target>${java.version}</target>
         </configuration>
       </plugin>
-      <plugin>
-        <artifactId>maven-shade-plugin</artifactId>
-        <version>3.5.1</version>
-        <executions>
-          <execution>
-            <phase>package</phase>
-            <goals>
-              <goal>shade</goal>
-            </goals>
-            <configuration>
-              <relocations>
-                <relocation>
-                  <pattern>space.arim.morepaperlib</pattern>
-                  <shadedPattern>dev.blockanimation.lib.morepaperlib</shadedPattern>
-                </relocation>
-              </relocations>
-              <minimizeJar>true</minimizeJar>
-            </configuration>
-          </execution>
-        </executions>
-      </plugin>
     </plugins>
   </build>
+  <profiles>
+    <profile>
+      <id>plugin</id>
+      <build>
+        <plugins>
+          <plugin>
+            <artifactId>maven-shade-plugin</artifactId>
+            <version>3.5.1</version>
+            <executions>
+              <execution>
+                <phase>package</phase>
+                <goals>
+                  <goal>shade</goal>
+                </goals>
+                <configuration>
+                  <relocations>
+                    <relocation>
+                      <pattern>space.arim.morepaperlib</pattern>
+                      <shadedPattern>dev.blockanimation.lib.morepaperlib</shadedPattern>
+                    </relocation>
+                  </relocations>
+                  <minimizeJar>true</minimizeJar>
+                </configuration>
+              </execution>
+            </executions>
+          </plugin>
+        </plugins>
+      </build>
+    </profile>
+    <profile>
+      <id>api</id>
+      <build>
+        <plugins>
+          <plugin>
+            <artifactId>maven-jar-plugin</artifactId>
+            <version>3.3.0</version>
+            <configuration>
+              <classifier>api</classifier>
+              <excludes>
+                <exclude>plugin.yml</exclude>
+                <exclude>dev/blockanimation/command/**</exclude>
+                <exclude>dev/blockanimation/BlockAnimationPlugin.class</exclude>
+              </excludes>
+            </configuration>
+          </plugin>
+        </plugins>
+      </build>
+    </profile>
+  </profiles>
   <repositories>
     <repository>
       <id>spigot-repo</id>
@@ -56,8 +84,8 @@
   </repositories>
   <dependencies>
     <dependency>
-      <groupId>org.spigotmc</groupId>
-      <artifactId>spigot-api</artifactId>
+      <groupId>io.papermc.paper</groupId>
+      <artifactId>paper-api</artifactId>
       <version>1.21-R0.1-SNAPSHOT</version>
       <scope>provided</scope>
     </dependency>

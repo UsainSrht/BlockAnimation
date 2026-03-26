@@ -11,16 +11,14 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 
 /**
- * Drives an {@link Animation} on a repeating schedule and binds its lifecycle
- * to a {@link CompletableFuture}.
+ * Drives an {@link Animation} on a repeating schedule.
  * <p>
- * The task:
- * <ol>
- *   <li>Calls {@link Animation#tick(AnimationContext, long)} every N ticks.</li>
- *   <li>Monitors the bound future — when it completes (normally or exceptionally),
- *       calls {@link Animation#reset(AnimationContext)} and self-cancels.</li>
- *   <li>Also cancels if the player goes offline.</li>
- * </ol>
+ * Lifecycle can be controlled by either:
+ * <ul>
+ *   <li>A {@link CompletableFuture} — animation runs until it completes.</li>
+ *   <li>A duration — animation auto-stops after the configured time.</li>
+ *   <li>Both — whichever completes first wins.</li>
+ * </ul>
  *
  * Scheduling is done via {@link MorePaperLib} for Folia region safety.
  */
@@ -30,9 +28,8 @@ public final class AnimationTask {
 
     private final Animation animation;
     private final AnimationContext context;
-    private final CompletableFuture<?> boundFuture;
+    private final CompletableFuture<?> boundFuture; // nullable — may be absent for duration-only
     private final MorePaperLib morePaperLib;
-    private final JavaPlugin plugin;
 
     private final AtomicLong tickCounter = new AtomicLong(0);
     private final AtomicBoolean stopped = new AtomicBoolean(false);
@@ -40,19 +37,17 @@ public final class AnimationTask {
     private volatile ScheduledTask scheduledTask;
 
     /**
-     * @param animation   the animation implementation
-     * @param context     animation context (player, blocks, palette, etc.)
-     * @param boundFuture the controlling future — animation stops when this completes
-     * @param plugin      owning plugin
+     * @param animation    the animation implementation
+     * @param context      animation context (player, blocks, palette, etc.)
+     * @param boundFuture  the controlling future, or {@code null} for duration-only mode
      * @param morePaperLib scheduling abstraction
      */
     public AnimationTask(Animation animation, AnimationContext context,
                          CompletableFuture<?> boundFuture,
-                         JavaPlugin plugin, MorePaperLib morePaperLib) {
+                         MorePaperLib morePaperLib) {
         this.animation = animation;
         this.context = context;
         this.boundFuture = boundFuture;
-        this.plugin = plugin;
         this.morePaperLib = morePaperLib;
     }
 
@@ -61,13 +56,13 @@ public final class AnimationTask {
      */
     public void start() {
         // Watch the bound future — when it completes, stop the animation
-        boundFuture.whenComplete((result, throwable) -> stop());
+        if (boundFuture != null) {
+            boundFuture.whenComplete((result, throwable) -> stop());
+        }
 
         long intervalTicks = context.tickIntervalTicks();
 
         // Schedule repeating task on the player's entity scheduler (Folia-safe).
-        // AttachedScheduler.runAtFixedRate(command, alternateIfRemoved, initialDelay, period)
-        // alternateIfRemoved is called if the entity is removed (player disconnects).
         scheduledTask = morePaperLib.scheduling()
                 .entitySpecificScheduler(context.player())
                 .runAtFixedRate(() -> {
@@ -81,13 +76,23 @@ public final class AnimationTask {
                         }
 
                         long elapsed = tickCounter.getAndAdd(intervalTicks);
+
+                        // Duration auto-stop check
+                        if (context.durationMs() > 0) {
+                            long elapsedMs = elapsed * 50; // ticks → ms
+                            if (elapsedMs >= context.durationMs()) {
+                                stop();
+                                return;
+                            }
+                        }
+
                         animation.tick(context, elapsed);
 
                     } catch (Exception e) {
                         LOGGER.log(Level.WARNING, "Animation tick error for " + animation.getName(), e);
                         stop();
                     }
-                }, this::stop, // alternateIfRemoved – called when entity is removed
+                }, this::stop, // alternateIfRemoved – entity removed
                 intervalTicks, intervalTicks);
     }
 
@@ -95,10 +100,9 @@ public final class AnimationTask {
      * Gracefully stop the animation: revert blocks and cancel the scheduled task.
      */
     public void stop() {
-        if (!stopped.compareAndSet(false, true)) return; // already stopped
+        if (!stopped.compareAndSet(false, true)) return;
 
         try {
-            // Revert blocks on the player's entity thread
             if (context.player().isOnline()) {
                 morePaperLib.scheduling()
                         .entitySpecificScheduler(context.player())
@@ -108,7 +112,7 @@ public final class AnimationTask {
                             } catch (Exception e) {
                                 LOGGER.log(Level.WARNING, "Animation reset error for " + animation.getName(), e);
                             }
-                        }, () -> { /* entity removed, nothing to revert */ });
+                        }, () -> { /* entity removed */ });
             }
         } finally {
             if (scheduledTask != null) {
@@ -117,17 +121,18 @@ public final class AnimationTask {
         }
     }
 
-    /**
-     * @return true if this task has been stopped
-     */
+    /** @return true if this task has been stopped */
     public boolean isStopped() {
         return stopped.get();
     }
 
-    /**
-     * @return the animation implementation being driven
-     */
+    /** @return the animation implementation being driven */
     public Animation getAnimation() {
         return animation;
+    }
+
+    /** @return the animation context */
+    public AnimationContext getContext() {
+        return context;
     }
 }

@@ -13,41 +13,56 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * <b>Pass-through (Directional)</b> animation — a color wave sweeps across the
- * visible blocks along a specific yaw angle, like a curtain of light.
- * <p>
- * Each block's position is projected onto the sweep axis. The "plane" of active
- * color moves along this axis over time, coloring blocks whose projection
- * falls within the sweep band.
+ * <b>Pass-through (Directional)</b> animation — a color wave sweeps across
+ * the visible blocks along a specific yaw angle, like a curtain of light.
  *
- * <h3>Looping</h3>
- * The sweep loops once it reaches the far end of the block set.
+ * <h3>Continuous mode (default)</h3>
+ * When {@code continuous = true}, blocks behind the sweep band <b>keep their color</b>.
+ * The entire colored region continuously cycles through the palette.
+ * Each sweep pass layers on the next phase of the gradient.
+ *
+ * <h3>Band-only mode</h3>
+ * When {@code continuous = false}, only the band is colored; blocks outside revert.
+ * This is the classic "scanning laser" effect.
  */
 public final class PassThroughAnimation implements Animation {
 
-    /** Sweep direction yaw in degrees (0 = south, 90 = west, etc.) */
+    /** Sweep direction yaw in degrees (0 = south, 90 = west). */
     private final float yawDegrees;
 
-    /** Duration of one full sweep in ticks */
+    /** Ticks for one full directional pass. */
     private final long sweepDurationTicks;
 
-    /** Width of the "color band" as a fraction of total extent (0..1) */
+    /** Width of the color band as a fraction of total extent (0..1). */
     private final float bandWidth;
 
+    /** When true, blocks retain color after the band passes. */
+    private final boolean continuous;
+
     /**
+     * Full constructor.
+     *
      * @param yawDegrees        sweep direction in degrees
-     * @param sweepDurationTicks ticks for one full directional pass
-     * @param bandWidth         fraction (0..1) of the total extent covered by the color band
+     * @param sweepDurationTicks ticks for one directional pass
+     * @param bandWidth         fraction (0..1) of extent covered by the band
+     * @param continuous        if true, blocks keep color after the band passes
      */
-    public PassThroughAnimation(float yawDegrees, long sweepDurationTicks, float bandWidth) {
+    public PassThroughAnimation(float yawDegrees, long sweepDurationTicks,
+                                float bandWidth, boolean continuous) {
         this.yawDegrees = yawDegrees;
         this.sweepDurationTicks = Math.max(1, sweepDurationTicks);
         this.bandWidth = Math.max(0.05f, Math.min(1.0f, bandWidth));
+        this.continuous = continuous;
     }
 
-    /** Default: sweep south, 2 seconds, 30% band. */
+    /** Continuous mode constructor. */
+    public PassThroughAnimation(float yawDegrees, long sweepDurationTicks, float bandWidth) {
+        this(yawDegrees, sweepDurationTicks, bandWidth, true);
+    }
+
+    /** Default: sweep south, 2 seconds, 30% band, continuous. */
     public PassThroughAnimation() {
-        this(0f, 40, 0.3f);
+        this(0f, 40, 0.3f, true);
     }
 
     @Override
@@ -86,12 +101,16 @@ public final class PassThroughAnimation implements Animation {
         double totalExtent = maxProj - minProj;
         if (totalExtent <= 0) totalExtent = 1;
 
-        // Current sweep position (0..1 looping)
-        float sweepPos = (float) ((elapsedTicks % sweepDurationTicks) / (double) sweepDurationTicks);
+        // Sweep position using loop mode
+        float sweepPos = ctx.resolveProgress(elapsedTicks, sweepDurationTicks);
 
-        // Band boundaries (allow the band to sweep from before to after the blocks)
-        float bandStart = sweepPos - bandWidth;
-        float bandEnd = sweepPos;
+        // How many full sweeps have completed (for cycling the palette phase)
+        float rawSweeps = (float) elapsedTicks / sweepDurationTicks;
+
+        // Band boundaries (extended to sweep from before to after the blocks)
+        // Band extends from sweepPos-bandWidth to sweepPos, in normalized [0,1] space
+        float bandLeading = sweepPos;
+        float bandTrailing = sweepPos - bandWidth;
 
         ShapeMatchingReplacer replacer = ctx.replacer();
         Map<BlockInfo, BlockData> changes = new HashMap<>();
@@ -100,21 +119,37 @@ public final class PassThroughAnimation implements Animation {
             // Normalize projection to [0, 1]
             float normalizedProj = (float) ((projections[i] - minProj) / totalExtent);
 
-            // Check if block falls within the color band
-            if (normalizedProj >= bandStart && normalizedProj <= bandEnd) {
-                // Position within the band → palette position
-                float bandPos = (normalizedProj - bandStart) / bandWidth;
+            boolean inBand = normalizedProj >= bandTrailing && normalizedProj <= bandLeading;
+            boolean behindBand = normalizedProj < bandTrailing;
+
+            if (inBand) {
+                // In the active band — color based on position within band
+                float bandPos = (normalizedProj - bandTrailing) / bandWidth;
                 RGBColor color = ctx.palette().getColorAt(bandPos);
 
                 BlockInfo block = blocks.get(i);
                 BlockData original = block.toBlockData();
                 BlockData replacement = replacer.computeReplacement(original, color);
                 changes.put(block, replacement);
-            } else {
-                // Outside the band — revert to original
+
+            } else if (continuous && behindBand) {
+                // Behind the band in continuous mode — keep colored with cycling palette
+                // Use the block's projection position + a time-based phase shift
+                float cyclePhase = ctx.resolveProgress(elapsedTicks, sweepDurationTicks);
+                float palettePos = (normalizedProj + cyclePhase) % 1.0f;
+                RGBColor color = ctx.palette().getColorAt(palettePos);
+
+                BlockInfo block = blocks.get(i);
+                BlockData original = block.toBlockData();
+                BlockData replacement = replacer.computeReplacement(original, color);
+                changes.put(block, replacement);
+
+            } else if (!continuous) {
+                // Not in band and not continuous — revert to original
                 BlockInfo block = blocks.get(i);
                 changes.put(block, block.toBlockData());
             }
+            // In continuous mode, blocks ahead of the band are left unchanged
         }
 
         if (!changes.isEmpty()) {

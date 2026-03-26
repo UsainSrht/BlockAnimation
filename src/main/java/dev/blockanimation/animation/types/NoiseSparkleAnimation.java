@@ -20,25 +20,37 @@ import java.util.concurrent.ThreadLocalRandom;
  * On each tick, a random subset of the visible blocks is selected and colored
  * at a random position in the palette. Blocks not selected in the current tick
  * are reverted to their original appearance, giving a twinkling effect.
+ * <p>
+ * The density of the sparkle can be configured. LoopMode is not directly
+ * applicable but the palette base shifts over time for visual variety.
  */
 public final class NoiseSparkleAnimation implements Animation {
 
-    /**
-     * Fraction of blocks that "sparkle" each tick (0..1).
-     * e.g., 0.15 = 15% of blocks shimmer on any given tick.
-     */
+    /** Fraction of blocks that "sparkle" each tick (0..1). */
     private final float density;
 
+    /** Ticks for one full palette base shift cycle. */
+    private final long cycleDurationTicks;
+
     /**
-     * @param density fraction of blocks to animate per tick (0.0–1.0)
+     * @param density          fraction of blocks to animate per tick (0.0–1.0)
+     * @param cycleDurationTicks ticks for one full palette shift cycle
      */
-    public NoiseSparkleAnimation(float density) {
+    public NoiseSparkleAnimation(float density, long cycleDurationTicks) {
         this.density = Math.max(0.01f, Math.min(1.0f, density));
+        this.cycleDurationTicks = Math.max(1, cycleDurationTicks);
     }
 
-    /** Default: 15% density. */
+    /**
+     * @param density fraction of blocks to animate per tick
+     */
+    public NoiseSparkleAnimation(float density) {
+        this(density, 60);
+    }
+
+    /** Default: 15% density, 3s cycle. */
     public NoiseSparkleAnimation() {
-        this(0.15f);
+        this(0.15f, 60);
     }
 
     @Override
@@ -55,10 +67,13 @@ public final class NoiseSparkleAnimation implements Animation {
         ShapeMatchingReplacer replacer = ctx.replacer();
         Map<BlockInfo, BlockData> changes = new HashMap<>();
 
+        // Palette base shift over time (adds visual variety)
+        float baseShift = ctx.resolveProgress(elapsedTicks, cycleDurationTicks);
+
         for (BlockInfo block : blocks) {
             if (rng.nextFloat() < density) {
-                // This block sparkles this tick — pick a random palette color
-                float palettePos = rng.nextFloat();
+                // This block sparkles — pick a random palette color + base shift
+                float palettePos = (rng.nextFloat() + baseShift) % 1.0f;
                 RGBColor color = ctx.palette().getColorAt(palettePos);
 
                 BlockData original = block.toBlockData();
