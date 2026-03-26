@@ -12,44 +12,41 @@ import org.bukkit.block.data.BlockData;
 import java.util.*;
 
 /**
- * <b>Spread (Radial)</b> animation — expands outward from one or more centers
- * like a shockwave, then keeps all reached blocks colored with a continuously
- * cycling gradient.
+ * <b>Spread (Radial Wave)</b> animation — a color wave emanates outward
+ * from one or more centers like ripples in water.
  *
- * <h3>Behavior</h3>
+ * <h3>How it works</h3>
  * <ol>
- *   <li>A wavefront expands outward at a configurable speed.</li>
- *   <li>Once a block is "reached" by the wavefront, it <b>stays colored</b>.</li>
- *   <li>The entire palette continuously shifts over time — all colored blocks
- *       cycle through the gradient together, offset by their distance from the center.</li>
- *   <li>When the wavefront has reached max radius, the palette simply keeps cycling
- *       on all blocks until the animation ends.</li>
+ *   <li>A wavefront expands outward from the center(s) over {@code spreadDurationTicks}.</li>
+ *   <li>Each block is "reached" when the wavefront passes its distance.</li>
+ *   <li>Once reached, the block starts cycling through the palette from the beginning.</li>
+ *   <li>Center blocks were reached first, so they're further along in the palette.
+ *       Edge blocks were reached later, so they're earlier in the palette.</li>
+ *   <li>This creates a true propagating wave: R appears at center, expands outward
+ *       as a ring, then G follows, then B follows, etc.</li>
  * </ol>
  *
  * <h3>Multi-center</h3>
  * Supports multiple spread origins. Each block uses the distance to the
- * <i>nearest</i> center for its wavefront check and palette position.
+ * nearest center for its wavefront timing.
  */
 public final class SpreadAnimation implements Animation {
 
     /** Ticks for the wavefront to reach the maximum radius. */
     private final long spreadDurationTicks;
 
-    /** Ticks for one full palette cycle (how fast the gradient shifts). */
+    /** Ticks for one full palette cycle on a single block. */
     private final long cycleDurationTicks;
 
-    /**
-     * Custom spread centers. If null/empty, uses the VisibleBlocks center.
-     * Stored as [x, y, z] triples.
-     */
+    /** Custom spread centers (nullable → uses VisibleBlocks center). */
     private final double[][] centers;
 
     /**
      * Full constructor.
      *
      * @param spreadDurationTicks ticks for wavefront to reach max radius (e.g., 40 = 2s)
-     * @param cycleDurationTicks  ticks for one full palette color cycle (e.g., 60 = 3s)
-     * @param centers             spread origins (may be empty for default center)
+     * @param cycleDurationTicks  ticks for one full color cycle per block (e.g., 60 = 3s)
+     * @param centers             spread origins (may be null/empty for default center)
      */
     public SpreadAnimation(long spreadDurationTicks, long cycleDurationTicks, List<Location> centers) {
         this.spreadDurationTicks = Math.max(1, spreadDurationTicks);
@@ -61,23 +58,14 @@ public final class SpreadAnimation implements Animation {
                 this.centers[i] = new double[]{loc.getX(), loc.getY(), loc.getZ()};
             }
         } else {
-            this.centers = null; // will use VisibleBlocks center
+            this.centers = null;
         }
     }
 
-    /**
-     * Single-center convenience.
-     *
-     * @param spreadDurationTicks ticks for the wavefront
-     * @param cycleDurationTicks  ticks for one palette cycle
-     */
     public SpreadAnimation(long spreadDurationTicks, long cycleDurationTicks) {
         this(spreadDurationTicks, cycleDurationTicks, null);
     }
 
-    /**
-     * Simple constructor — 2s spread, 3s cycle.
-     */
     public SpreadAnimation(long spreadDurationTicks) {
         this(spreadDurationTicks, 60);
     }
@@ -111,44 +99,44 @@ public final class SpreadAnimation implements Animation {
             }};
         }
 
-        // Wavefront expansion progress (0..1, clamped at 1 once fully spread)
-        float spreadProgress = Math.min(1.0f, (float) elapsedTicks / spreadDurationTicks);
-
-        // Active radius (in blocks)
-        double activeRadius = spreadProgress * maxDist;
+        // Current wavefront radius
+        double activeRadius = ((double) elapsedTicks / spreadDurationTicks) * maxDist;
         double activeRadiusSq = activeRadius * activeRadius;
-
-        // Palette cycle phase — uses LoopMode
-        float cyclePhase = ctx.resolveProgress(elapsedTicks, cycleDurationTicks);
 
         ShapeMatchingReplacer replacer = ctx.replacer();
         Map<BlockInfo, BlockData> changes = new HashMap<>();
 
         for (BlockInfo block : blocks) {
             // Distance to nearest center
-            double nearestDistSq = Double.MAX_VALUE;
+            double nearestDist = Double.MAX_VALUE;
             for (double[] center : activeCenters) {
                 double dx = (block.x() + 0.5) - center[0];
                 double dy = (block.y() + 0.5) - center[1];
                 double dz = (block.z() + 0.5) - center[2];
-                double dSq = dx * dx + dy * dy + dz * dz;
-                if (dSq < nearestDistSq) nearestDistSq = dSq;
+                double d = Math.sqrt(dx * dx + dy * dy + dz * dz);
+                if (d < nearestDist) nearestDist = d;
             }
 
             // Has the wavefront reached this block?
-            if (nearestDistSq <= activeRadiusSq) {
-                // Distance fraction for palette offset
-                float distFraction = (float) (Math.sqrt(nearestDistSq) / maxDist);
+            if (nearestDist * nearestDist <= activeRadiusSq) {
+                // When was this block first reached?
+                // t_reach = (nearestDist / maxDist) * spreadDurationTicks
+                long ticksReached = (long) ((nearestDist / maxDist) * spreadDurationTicks);
 
-                // Combine distance offset + time-based phase shift
-                float palettePos = (distFraction + cyclePhase) % 1.0f;
+                // How long has this block been "colored"?
+                long ticksSinceReached = elapsedTicks - ticksReached;
+
+                // Palette position = how far this block has progressed through the cycle
+                // Center blocks have large ticksSinceReached → further in palette
+                // Edge blocks have small ticksSinceReached → earlier in palette
+                float palettePos = ctx.resolveProgress(ticksSinceReached, cycleDurationTicks);
 
                 RGBColor color = ctx.palette().getColorAt(palettePos);
                 BlockData original = block.toBlockData();
                 BlockData replacement = replacer.computeReplacement(original, color);
                 changes.put(block, replacement);
             }
-            // Blocks not yet reached → leave unchanged (no revert spam)
+            // Blocks not yet reached → leave unchanged
         }
 
         if (!changes.isEmpty()) {

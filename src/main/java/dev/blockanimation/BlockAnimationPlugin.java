@@ -58,7 +58,7 @@ public final class BlockAnimationPlugin extends JavaPlugin {
             BlockAnimationCommand cmd = new BlockAnimationCommand(api);
             this.getLifecycleManager().registerEventHandler(LifecycleEvents.COMMANDS, commands -> {
                 commands.registrar().register(cmd.buildCommand(),
-                        "Test command for BlockAnimation. Usage: /blockanimation <spread|passthrough|sparkle|stop>");
+                        "BlockAnimation test command. Usage: /ba <spread|passthrough|sparkle|stop>");
             });
         } catch (Exception e) {
             getLogger().warning("Could not register Brigadier command (Paper API required): " + e.getMessage());
