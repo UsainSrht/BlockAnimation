@@ -1,13 +1,19 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/maven-v4_0_0.xsd">
   <modelVersion>4.0.0</modelVersion>
-  <groupId>dev.blockanimation</groupId>
+  <groupId>me.usainsrht.blockanimation</groupId>
   <artifactId>BlockAnimation</artifactId>
   <name>BlockAnimation</name>
   <version>1.0.1</version>
   <description>Async visible-block detection and packet-based color-shift animation API for Spigot, Paper, and Folia.</description>
   <build>
     <defaultGoal>clean package</defaultGoal>
+    <resources>
+      <resource>
+        <filtering>true</filtering>
+        <directory>src/main/resources</directory>
+      </resource>
+    </resources>
     <plugins>
       <plugin>
         <artifactId>maven-compiler-plugin</artifactId>
@@ -37,7 +43,7 @@
                   <relocations>
                     <relocation>
                       <pattern>space.arim.morepaperlib</pattern>
-                      <shadedPattern>dev.blockanimation.lib.morepaperlib</shadedPattern>
+                      <shadedPattern>me.usainsrht.blockanimation.lib.morepaperlib</shadedPattern>
                     </relocation>
                   </relocations>
                   <minimizeJar>true</minimizeJar>
@@ -59,8 +65,8 @@
               <classifier>api</classifier>
               <excludes>
                 <exclude>plugin.yml</exclude>
-                <exclude>dev/blockanimation/command/**</exclude>
-                <exclude>dev/blockanimation/BlockAnimationPlugin.class</exclude>
+                <exclude>me/usainsrht/blockanimation/command/**</exclude>
+                <exclude>me/usainsrht/blockanimation/BlockAnimationPlugin.class</exclude>
               </excludes>
             </configuration>
           </plugin>
@@ -96,6 +102,12 @@
       <scope>provided</scope>
     </dependency>
   </dependencies>
+  <distributionManagement>
+    <repository>
+      <id>UsainSrht</id>
+      <url>https://repo.codemc.io/repository/UsainSrht/</url>
+    </repository>
+  </distributionManagement>
   <properties>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     <maven.compiler.target>${java.version}</maven.compiler.target>
