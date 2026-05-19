@@ -11,7 +11,7 @@ import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
-import java.util.logging.Logger;
+import java.util.logging.Level;
 
 /**
  * Central manager for active animations.
@@ -26,8 +26,6 @@ import java.util.logging.Logger;
  * All public methods are thread-safe.
  */
 public final class AnimationEngine {
-
-    private static final Logger LOGGER = Logger.getLogger(AnimationEngine.class.getName());
 
     private final JavaPlugin plugin;
     private final MorePaperLib morePaperLib;
@@ -141,7 +139,7 @@ public final class AnimationEngine {
                 Math.max(50, tickIntervalMs), durationMs, loopMode
         );
 
-        AnimationTask task = new AnimationTask(animation, ctx, boundFuture, morePaperLib);
+        AnimationTask task = new AnimationTask(animation, ctx, boundFuture, plugin, morePaperLib);
 
         // Register
         activeTasks.computeIfAbsent(player.getUniqueId(), k -> Collections.synchronizedList(new ArrayList<>()))
@@ -155,7 +153,7 @@ public final class AnimationEngine {
 
         task.start();
 
-        LOGGER.fine(() -> "Started animation '" + animation.getName() + "' for " + player.getName()
+        plugin.getLogger().fine(() -> "Started animation '" + animation.getName() + "' for " + player.getName()
                 + " with " + visibleBlocks.getBlocks().size() + " blocks, loopMode=" + loopMode);
 
         return task;

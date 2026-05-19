@@ -5,11 +5,11 @@ import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.World;
 import org.bukkit.block.Block;
+import org.bukkit.plugin.java.JavaPlugin;
 
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.logging.Level;
-import java.util.logging.Logger;
 
 /**
  * Asynchronous radial surface-block scanner.
@@ -41,8 +41,6 @@ import java.util.logging.Logger;
  */
 public final class VisibilityAnalyzer {
 
-    private static final Logger LOGGER = Logger.getLogger(VisibilityAnalyzer.class.getName());
-
     /** 6-connected neighbour offsets */
     private static final int[][] OFFSETS = {
             { 1, 0, 0}, {-1, 0, 0},
@@ -50,9 +48,11 @@ public final class VisibilityAnalyzer {
             { 0, 0, 1}, { 0, 0,-1}
     };
 
+    private final JavaPlugin plugin;
     private final MorePaperLib morePaperLib;
 
-    public VisibilityAnalyzer(MorePaperLib morePaperLib) {
+    public VisibilityAnalyzer(JavaPlugin plugin, MorePaperLib morePaperLib) {
+        this.plugin = plugin;
         this.morePaperLib = morePaperLib;
     }
 
@@ -71,15 +71,19 @@ public final class VisibilityAnalyzer {
         CompletableFuture<VisibleBlocks> future = new CompletableFuture<>();
 
         // Schedule on the region that owns the center location (Folia-safe)
-        morePaperLib.scheduling().regionSpecificScheduler(center).run(() -> {
-            try {
-                VisibleBlocks result = runBFS(center, clampedRadius);
-                future.complete(result);
-            } catch (Exception e) {
-                LOGGER.log(Level.SEVERE, "Visibility analysis failed", e);
-                future.completeExceptionally(e);
-            }
-        });
+        try {
+            morePaperLib.scheduling().regionSpecificScheduler(center).run(() -> {
+                try {
+                    VisibleBlocks result = runBFS(center, clampedRadius);
+                    future.complete(result);
+                } catch (Throwable t) {
+                    plugin.getLogger().log(Level.SEVERE, "Visibility analysis failed", t);
+                    future.completeExceptionally(t);
+                }
+            });
+        } catch (Throwable t) {
+            future.completeExceptionally(t);
+        }
 
         return future;
     }
@@ -149,7 +153,7 @@ public final class VisibilityAnalyzer {
             }
         }
 
-        LOGGER.fine(() -> "Visibility scan at (" + cx + "," + cy + "," + cz +
+        plugin.getLogger().fine(() -> "Visibility scan at (" + cx + "," + cy + "," + cz +
                 ") r=" + radius + " found " + visibleBlocks.size() + " visible blocks");
 
         return new VisibleBlocks(

@@ -61,7 +61,7 @@ public final class BlockAnimationAPI {
         this.plugin = plugin;
         this.morePaperLib = morePaperLib;
         this.animationEngine = animationEngine;
-        this.visibilityAnalyzer = new VisibilityAnalyzer(morePaperLib);
+        this.visibilityAnalyzer = new VisibilityAnalyzer(plugin, morePaperLib);
     }
 
     // ------------------------------------------------------------------

@@ -2,12 +2,12 @@ package me.usainsrht.blockanimation.animation;
 
 import space.arim.morepaperlib.MorePaperLib;
 import space.arim.morepaperlib.scheduling.ScheduledTask;
+import org.bukkit.plugin.java.JavaPlugin;
 
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.logging.Level;
-import java.util.logging.Logger;
 
 /**
  * Drives an {@link Animation} on a repeating schedule.
@@ -23,11 +23,10 @@ import java.util.logging.Logger;
  */
 public final class AnimationTask {
 
-    private static final Logger LOGGER = Logger.getLogger(AnimationTask.class.getName());
-
     private final Animation animation;
     private final AnimationContext context;
     private final CompletableFuture<?> boundFuture; // nullable — may be absent for duration-only
+    private final JavaPlugin plugin;
     private final MorePaperLib morePaperLib;
 
     private final AtomicLong tickCounter = new AtomicLong(0);
@@ -39,14 +38,17 @@ public final class AnimationTask {
      * @param animation    the animation implementation
      * @param context      animation context (player, blocks, palette, etc.)
      * @param boundFuture  the controlling future, or {@code null} for duration-only mode
+     * @param plugin       the plugin instance
      * @param morePaperLib scheduling abstraction
      */
     public AnimationTask(Animation animation, AnimationContext context,
                          CompletableFuture<?> boundFuture,
+                         JavaPlugin plugin,
                          MorePaperLib morePaperLib) {
         this.animation = animation;
         this.context = context;
         this.boundFuture = boundFuture;
+        this.plugin = plugin;
         this.morePaperLib = morePaperLib;
     }
 
@@ -87,8 +89,8 @@ public final class AnimationTask {
 
                         animation.tick(context, elapsed);
 
-                    } catch (Exception e) {
-                        LOGGER.log(Level.WARNING, "Animation tick error for " + animation.getName(), e);
+                    } catch (Throwable t) {
+                        plugin.getLogger().log(Level.WARNING, "Animation tick error for " + animation.getName(), t);
                         stop();
                     }
                 }, this::stop, // alternateIfRemoved – entity removed
@@ -108,11 +110,13 @@ public final class AnimationTask {
                         .run(() -> {
                             try {
                                 animation.reset(context);
-                            } catch (Exception e) {
-                                LOGGER.log(Level.WARNING, "Animation reset error for " + animation.getName(), e);
+                            } catch (Throwable t) {
+                                plugin.getLogger().log(Level.WARNING, "Animation reset error for " + animation.getName(), t);
                             }
                         }, () -> { /* entity removed */ });
             }
+        } catch (Throwable t) {
+            plugin.getLogger().log(Level.SEVERE, "Unexpected error stopping animation", t);
         } finally {
             if (scheduledTask != null) {
                 scheduledTask.cancel();
