@@ -1,6 +1,7 @@
 package me.usainsrht.blockanimation.color;
 
 import me.usainsrht.blockanimation.shape.ShapeGroup;
+import org.bukkit.Color;
 import org.bukkit.Material;
 
 import java.util.*;
@@ -37,10 +38,18 @@ public final class BlockColorRegistry {
     // ------------------------------------------------------------------
 
     /**
-     * @return the registered average color for the given material, or {@code null} if unknown.
+     * @return the registered average color for the given material, or its map color if unknown.
      */
     public static RGBColor getColor(Material material) {
-        return COLORS.get(material);
+        RGBColor color = COLORS.get(material);
+        if (color != null) return color;
+
+        try {
+            Color bukkitColor = material.createBlockData().getMapColor();
+            return new RGBColor(bukkitColor.getRed(), bukkitColor.getGreen(), bukkitColor.getBlue());
+        } catch (IllegalArgumentException | UnsupportedOperationException e) {
+            return null;
+        }
     }
 
     /**
@@ -615,6 +624,13 @@ public final class BlockColorRegistry {
         put(Material.SCULK_CATALYST, 15, 86, 88);
         put(Material.SPONGE, 195, 192, 74);
         put(Material.WET_SPONGE, 171, 181, 70);
+
+        // === Technical Blocks ===
+        put(Material.COMMAND_BLOCK, 199, 150, 117);
+        put(Material.CHAIN_COMMAND_BLOCK, 149, 180, 163);
+        put(Material.REPEATING_COMMAND_BLOCK, 126, 103, 163);
+        put(Material.JIGSAW, 83, 73, 83);
+        put(Material.STRUCTURE_BLOCK, 76, 56, 76);
     }
 
     private static void put(Material mat, int r, int g, int b) {

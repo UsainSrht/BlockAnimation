@@ -29,7 +29,6 @@ public final class BlockGradientPalette implements ColorPalette {
 
     /**
      * @param materials ordered list of block materials whose average colours define the gradient
-     * @throws IllegalArgumentException if any material is not registered in the colour registry
      */
     public BlockGradientPalette(List<Material> materials) {
         Objects.requireNonNull(materials, "materials must not be null");
@@ -40,7 +39,8 @@ public final class BlockGradientPalette implements ColorPalette {
         for (Material mat : materials) {
             RGBColor color = BlockColorRegistry.getColor(mat);
             if (color == null) {
-                throw new IllegalArgumentException("Material " + mat + " has no registered color in BlockColorRegistry");
+                // Fallback to magenta if even map color fails (should be rare)
+                color = new RGBColor(255, 0, 255);
             }
             stops.add(color);
         }
