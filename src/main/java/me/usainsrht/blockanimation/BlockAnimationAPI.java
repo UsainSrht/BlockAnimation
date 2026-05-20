@@ -4,6 +4,7 @@ import me.usainsrht.blockanimation.animation.Animation;
 import me.usainsrht.blockanimation.animation.AnimationEngine;
 import me.usainsrht.blockanimation.animation.AnimationTask;
 import me.usainsrht.blockanimation.animation.LoopMode;
+import me.usainsrht.blockanimation.color.BlockColorRegistry;
 import me.usainsrht.blockanimation.color.ColorPalette;
 import me.usainsrht.blockanimation.visibility.VisibilityAnalyzer;
 import me.usainsrht.blockanimation.visibility.VisibleBlocks;
@@ -61,6 +62,9 @@ public final class BlockAnimationAPI {
         this.plugin = plugin;
         this.morePaperLib = morePaperLib;
         this.animationEngine = animationEngine;
+        // Ensure the color registry is populated even when this library is shaded —
+        // standalone plugin calls init() in onEnable, but shaded consumers skip that.
+        BlockColorRegistry.init();
         this.visibilityAnalyzer = new VisibilityAnalyzer(plugin, morePaperLib);
     }
 
