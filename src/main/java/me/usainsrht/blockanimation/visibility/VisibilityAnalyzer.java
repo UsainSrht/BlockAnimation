@@ -1,6 +1,8 @@
 package me.usainsrht.blockanimation.visibility;
 
 import space.arim.morepaperlib.MorePaperLib;
+import space.arim.morepaperlib.scheduling.ScheduledTask;
+import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.World;
@@ -58,6 +60,14 @@ public final class VisibilityAnalyzer {
 
     /**
      * Asynchronously compute all visible surface blocks around the given center.
+     * <p>
+     * On non-Folia servers the BFS is dispatched to the next server tick via the
+     * Bukkit scheduler.  On Folia it is dispatched to the region thread that owns
+     * {@code center} via MorePaperLib's {@code regionSpecificScheduler}.
+     * <p>
+     * The returned future will <em>always</em> complete (normally or exceptionally).
+     * Use {@link java.util.concurrent.CompletableFuture#whenComplete} (not just
+     * {@code thenAccept}) if you need to observe failures.
      *
      * @param center the scan origin (block coordinates are derived from this)
      * @param radius maximum scan radius in blocks (clamped to [1, 64])
@@ -70,22 +80,58 @@ public final class VisibilityAnalyzer {
         int clampedRadius = Math.max(1, Math.min(64, radius));
         CompletableFuture<VisibleBlocks> future = new CompletableFuture<>();
 
-        // Schedule on the region that owns the center location (Folia-safe)
+        Runnable scanTask = () -> {
+            try {
+                VisibleBlocks result = runBFS(center, clampedRadius);
+                future.complete(result);
+            } catch (Throwable t) {
+                plugin.getLogger().log(Level.SEVERE, "[BlockAnimation] Visibility BFS failed", t);
+                future.completeExceptionally(t);
+            }
+        };
+
         try {
-            morePaperLib.scheduling().regionSpecificScheduler(center).run(() -> {
-                try {
-                    VisibleBlocks result = runBFS(center, clampedRadius);
-                    future.complete(result);
-                } catch (Throwable t) {
-                    plugin.getLogger().log(Level.SEVERE, "Visibility analysis failed", t);
-                    future.completeExceptionally(t);
-                }
-            });
+            // On non-Folia (Paper/Spigot/CraftBukkit) use the standard Bukkit scheduler
+            // directly — this avoids any MorePaperLib relocation / version-mismatch issues.
+            // On Folia, Bukkit.getScheduler() throws UnsupportedOperationException, so we
+            // catch that and fall through to the region-specific path below.
+            Bukkit.getScheduler().runTask(plugin, scanTask);
+
+        } catch (UnsupportedOperationException foliaEx) {
+            // ── Folia path ──────────────────────────────────────────────────────────────
+            // Must dispatch to the region thread that owns the center location.
+            scheduleFolia(center, future, scanTask);
+
         } catch (Throwable t) {
+            // Scheduling itself failed (e.g. plugin disabled, null scheduler, …).
+            // Log so the developer can see it — without this the only symptom would be
+            // a silently hanging CompletableFuture.
+            plugin.getLogger().log(Level.SEVERE, "[BlockAnimation] Failed to schedule visibility scan", t);
             future.completeExceptionally(t);
         }
 
         return future;
+    }
+
+    /** Folia-specific region-thread scheduling with null-return guard. */
+    private void scheduleFolia(Location center, CompletableFuture<VisibleBlocks> future, Runnable scanTask) {
+        try {
+            ScheduledTask scheduled = morePaperLib.scheduling()
+                    .regionSpecificScheduler(center)
+                    .run(scanTask);
+
+            if (scheduled == null) {
+                // regionSpecificScheduler returns null when the region is not loaded.
+                // Complete exceptionally so the future does not hang indefinitely.
+                String msg = "[BlockAnimation] Region not loaded for visibility scan at "
+                        + center + " — scan aborted.";
+                plugin.getLogger().warning(msg);
+                future.completeExceptionally(new IllegalStateException(msg));
+            }
+        } catch (Throwable t) {
+            plugin.getLogger().log(Level.SEVERE, "[BlockAnimation] Failed to schedule visibility scan on Folia", t);
+            future.completeExceptionally(t);
+        }
     }
 
     // ------------------------------------------------------------------
