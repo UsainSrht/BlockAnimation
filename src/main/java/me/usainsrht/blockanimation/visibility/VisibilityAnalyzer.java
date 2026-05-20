@@ -43,6 +43,24 @@ import java.util.logging.Level;
  */
 public final class VisibilityAnalyzer {
 
+    /**
+     * True when running inside a Folia server.
+     * Detected once at class-load time by probing a Folia-only class.
+     * This is more reliable than catching {@link UnsupportedOperationException}
+     * from the legacy Bukkit scheduler, whose behaviour on Folia has changed across
+     * versions (older versions threw; newer versions silently no-op).
+     */
+    private static final boolean IS_FOLIA = detectFolia();
+
+    private static boolean detectFolia() {
+        try {
+            Class.forName("io.papermc.paper.threadedregions.RegionizedServer");
+            return true;
+        } catch (ClassNotFoundException e) {
+            return false;
+        }
+    }
+
     /** 6-connected neighbour offsets */
     private static final int[][] OFFSETS = {
             { 1, 0, 0}, {-1, 0, 0},
@@ -90,24 +108,19 @@ public final class VisibilityAnalyzer {
             }
         };
 
-        try {
-            // On non-Folia (Paper/Spigot/CraftBukkit) use the standard Bukkit scheduler
-            // directly — this avoids any MorePaperLib relocation / version-mismatch issues.
-            // On Folia, Bukkit.getScheduler() throws UnsupportedOperationException, so we
-            // catch that and fall through to the region-specific path below.
-            Bukkit.getScheduler().runTask(plugin, scanTask);
-
-        } catch (UnsupportedOperationException foliaEx) {
-            // ── Folia path ──────────────────────────────────────────────────────────────
-            // Must dispatch to the region thread that owns the center location.
+        if (IS_FOLIA) {
+            // ── Folia: dispatch to the owning region thread ──────────────────────────
             scheduleFolia(center, future, scanTask);
-
-        } catch (Throwable t) {
-            // Scheduling itself failed (e.g. plugin disabled, null scheduler, …).
-            // Log so the developer can see it — without this the only symptom would be
-            // a silently hanging CompletableFuture.
-            plugin.getLogger().log(Level.SEVERE, "[BlockAnimation] Failed to schedule visibility scan", t);
-            future.completeExceptionally(t);
+        } else {
+            // ── Non-Folia (Paper / Spigot / CraftBukkit): use the standard scheduler ─
+            // Direct Bukkit scheduling avoids any MorePaperLib relocation / version
+            // mismatch issues that would silently swallow the scheduling call.
+            try {
+                Bukkit.getScheduler().runTask(plugin, scanTask);
+            } catch (Throwable t) {
+                plugin.getLogger().log(Level.SEVERE, "[BlockAnimation] Failed to schedule visibility scan", t);
+                future.completeExceptionally(t);
+            }
         }
 
         return future;

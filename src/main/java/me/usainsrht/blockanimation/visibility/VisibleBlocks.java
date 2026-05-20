@@ -63,6 +63,15 @@ public final class VisibleBlocks {
     }
 
     /**
+     * Convenience shorthand for {@code getBlocks().size()}.
+     *
+     * @return number of visible surface blocks detected
+     */
+    public int size() {
+        return blocks.size();
+    }
+
+    /**
      * @return the maximum Euclidean distance (squared) of any block from the center
      */
     public double getMaxDistanceSquared() {
